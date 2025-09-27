@@ -1,1 +1,10 @@
-int abcd;
+int main() {
+    char c = 'a';
+    int x = 10;
+    if (x >= 10) {
+        x++;
+    } else {
+        x--;
+    }
+    return x;
+}

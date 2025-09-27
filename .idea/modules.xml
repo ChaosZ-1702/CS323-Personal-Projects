@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/CS323-Compilers-2025F-Projects.iml" filepath="$PROJECT_DIR$/.idea/CS323-Compilers-2025F-Projects.iml" />
+      <module fileurl="file://$PROJECT_DIR$/CS323-Compilers-2025F-Projects.iml" filepath="$PROJECT_DIR$/CS323-Compilers-2025F-Projects.iml" />
     </modules>
   </component>
 </project>
