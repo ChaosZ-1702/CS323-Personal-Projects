@@ -55,6 +55,6 @@ Number     : [0-9] | [1-9][0-9]* ;
 Char       : '\'' (~['\\] | '\\'.) '\'' ;
 
 // ---------- Whitespace & Comments ----------
-WS            : [ \t\r\n]+ -> skip ;
+WS            : [ \f\n\r\t\u000B]+ -> skip ;  // why no \v...
 LINE_COMMENT  : '//' ~[\r\n]* -> skip ;
 BLOCK_COMMENT : '/*' .*? '*/' -> skip ;
