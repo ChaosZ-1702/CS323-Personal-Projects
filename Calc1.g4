@@ -2,13 +2,11 @@ grammar Calc1;
 
 root: lower_expr <EOF>;
 
-lower_expr    : upper_expr ADD upper_expr
-              | upper_expr SUB upper_expr
+lower_expr    : upper_expr (ADD | SUB) upper_expr
               | upper_expr
               ;
 
-upper_expr    : upper_expr TIMES upper_expr
-              | upper_expr DIV upper_expr
+upper_expr    : upper_expr (TIMES | DIV) upper_expr
               | factor
               ;
 
