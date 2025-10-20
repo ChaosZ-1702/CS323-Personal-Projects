@@ -14,9 +14,49 @@ grammar Splc;
 
 program: globalDef* EOF;
 
-globalDef
-    : // TODO
-    ;
+globalDef: specifier Identifier LPAREN funcArgs RPAREN LBRACE statement* RBRACE |
+    specifier varDec SEMI |
+    specifier SEMI;
+
+specifier: INT | CHAR |
+    STRUCT Identifier | STRUCT Identifier LBRACE (specifier varDec SEMI)* RBRACE;
+
+varDec: Identifier | varDec LBRACK Number RBRACK | STAR varDec | LPAREN varDec RPAREN;
+
+funcArgs: (specifier varDec(COMMA specifier varDec)*)?;
+
+statement:
+    LBRACE statement* RBRACE |
+    specifier varDec (ASSIGN expression)? SEMI |
+    IF LPAREN expression RPAREN statement (ELSE statement)? |
+    WHILE LPAREN expression RPAREN statement |
+    RETURN expression? SEMI |
+    expression SEMI;
+
+expression: assignExpr;
+
+assignExpr: logicalOrExpr (ASSIGN assignExpr)?;
+
+logicalOrExpr: logicalAndExpr (OR logicalAndExpr)*;
+
+logicalAndExpr: eqExpr (AND eqExpr)*;
+
+eqExpr: relationExpr ((EQ | NEQ) relationExpr)*;
+
+relationExpr: addExpr ((LT | LE | GT | GE) addExpr)*;
+
+addExpr: mulExpr ((PLUS | MINUS) mulExpr)*;
+
+mulExpr: prefixExpr ((STAR | DIV | MOD) prefixExpr)*;
+
+prefixExpr: (INC | DEC | PLUS | MINUS | NOT | STAR | AMP)* postfixExpr;
+
+postfixExpr: expr ((INC | DEC) |
+    expression LPAREN (expression (COMMA expression)*)? RPAREN |
+    LBRACK expression RBRACK |
+    (DOT | ARROW) Identifier)*;
+
+expr: Identifier | Number | Char | LPAREN expression RPAREN;
 
 // =========================
 // Lexer Rules
