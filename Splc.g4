@@ -21,6 +21,8 @@ globalDef: specifier Identifier LPAREN funcArgs RPAREN LBRACE statement* RBRACE 
 specifier: INT | CHAR |
     STRUCT Identifier | STRUCT Identifier LBRACE (specifier varDec SEMI)* RBRACE;
 
+varDecStmt: varDec (ASSIGN expression)? SEMI;
+
 varDec: Identifier | varDec LBRACK Number RBRACK | STAR varDec | LPAREN varDec RPAREN;
 
 funcArgs: (specifier varDec(COMMA specifier varDec)*)?;
@@ -33,30 +35,19 @@ statement:
     RETURN expression? SEMI |
     expression SEMI;
 
-expression: assignExpr;
-
-assignExpr: logicalOrExpr (ASSIGN assignExpr)?;
-
-logicalOrExpr: logicalAndExpr (OR logicalAndExpr)*;
-
-logicalAndExpr: eqExpr (AND eqExpr)*;
-
-eqExpr: relationExpr ((EQ | NEQ) relationExpr)*;
-
-relationExpr: addExpr ((LT | LE | GT | GE) addExpr)*;
-
-addExpr: mulExpr ((PLUS | MINUS) mulExpr)*;
-
-mulExpr: prefixExpr ((STAR | DIV | MOD) prefixExpr)*;
-
-prefixExpr: (INC | DEC | PLUS | MINUS | NOT | STAR | AMP)* postfixExpr;
-
-postfixExpr: expr ((INC | DEC) |
-    expression LPAREN (expression (COMMA expression)*)? RPAREN |
-    LBRACK expression RBRACK |
-    (DOT | ARROW) Identifier)*;
-
-expr: Identifier | Number | Char | LPAREN expression RPAREN;
+expression: Identifier | Number | Char | LPAREN expression RPAREN |
+    expression (INC | DEC) |
+    Identifier LPAREN (expression (COMMA expression)*)? RPAREN |
+    expression LBRACK expression RBRACK |
+    expression (DOT | ARROW) Identifier |
+    (INC | DEC | PLUS | MINUS | NOT | STAR | AMP)+ expression |
+    expression (STAR | DIV | MOD) expression |
+    expression (PLUS | MINUS) expression |
+    expression (LT | LE | GT | GE) expression |
+    expression (EQ | NEQ) expression |
+    expression (AND) expression |
+    expression (OR) expression |
+    expression ASSIGN expression;
 
 // =========================
 // Lexer Rules
