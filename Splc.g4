@@ -21,19 +21,17 @@ globalDef: specifier Identifier LPAREN funcArgs RPAREN LBRACE statement* RBRACE 
 specifier: INT | CHAR |
     STRUCT Identifier | STRUCT Identifier LBRACE (specifier varDec SEMI)* RBRACE;
 
-varDecStmt: varDec (ASSIGN expression)? SEMI;
-
 varDec: Identifier | varDec LBRACK Number RBRACK | STAR varDec | LPAREN varDec RPAREN;
 
 funcArgs: (specifier varDec(COMMA specifier varDec)*)?;
 
 statement:
-    LBRACE statement* RBRACE |
-    specifier varDec (ASSIGN expression)? SEMI |
-    IF LPAREN expression RPAREN statement (ELSE statement)? |
-    WHILE LPAREN expression RPAREN statement |
-    RETURN expression? SEMI |
-    expression SEMI;
+    LBRACE statement* RBRACE  # blockStmt  |
+    specifier varDec (ASSIGN expression)? SEMI  # varDecStmt |
+    IF LPAREN expression RPAREN statement (ELSE statement)?  # ifStmt |
+    WHILE LPAREN expression RPAREN statement  # whileStmt |
+    RETURN expression? SEMI  # returnStmt |
+    expression SEMI  # exprStmt;
 
 expression: Identifier | Number | Char | LPAREN expression RPAREN |
     expression (INC | DEC) |
