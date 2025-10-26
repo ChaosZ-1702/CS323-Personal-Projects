@@ -45,7 +45,9 @@ expression: Identifier | Number | Char | LPAREN expression RPAREN |
     expression (EQ | NEQ) expression |
     expression (AND) expression |
     expression (OR) expression |
-    expression ASSIGN expression;
+    expression ASSIGN expression |
+    expression Identifier {this.notifyErrorListeners("Missing '.'");}|
+    expression expression {this.notifyErrorListeners("Missing '=='");};
 
 // =========================
 // Lexer Rules
