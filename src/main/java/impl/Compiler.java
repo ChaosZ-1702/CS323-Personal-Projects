@@ -52,6 +52,11 @@ public class Compiler extends AbstractCompiler {
         myVisitor v = new myVisitor();
         v.visit(program);
 
+        for (Map.Entry<String, Type> vs : v.variables.entrySet())
+            if (vs.getValue() instanceof StructureType st) {
+                if (!st.isComplete && v.incompleteIdentifiers.containsKey(vs.getKey()))
+                    grader.reportSemanticError(Project3SemanticError.definitionIncomplete(v.incompleteIdentifiers.get(vs.getKey())));
+            }
         grader.print("Variables:\n");
         for (Map.Entry<String, Type> vs : v.variables.entrySet())
             grader.print(vs.getKey() + ": " + vs.getValue().fullPrint() + "\n");
@@ -213,12 +218,14 @@ public class Compiler extends AbstractCompiler {
         private Deque<Scope> scopeStack;
         LinkedHashMap<String, Type> variables;
         LinkedHashMap<String, FunctionType> functions;
+        LinkedHashMap<String, TerminalNode> incompleteIdentifiers;
 
         public myVisitor() {
             this.fileScope = new Scope(null);
             this.scopeStack = new ArrayDeque<>();
             this.variables = new LinkedHashMap<>();
             this.functions = new LinkedHashMap<>();
+            this.incompleteIdentifiers = new LinkedHashMap<>();
             this.enterScope(fileScope);
         }
 
@@ -261,6 +268,17 @@ public class Compiler extends AbstractCompiler {
             return id != null ? id.getText() : null;
         }
 
+        private void checkNestedStructureRedeclaration(SplcParser.SpecifierContext ctx, String tag) {
+            for (int i = 0; i < ctx.specifier().size(); i++) {
+                SplcParser.SpecifierContext mSpec = ctx.specifier(i);
+                if (mSpec.STRUCT() != null && mSpec.Identifier() != null && mSpec.LBRACE() != null) {
+                    String nestedTag = mSpec.Identifier().getText();
+                    if (nestedTag.equals(tag))
+                        grader.reportSemanticError(Project3SemanticError.redeclaration(mSpec.Identifier()));
+                    checkNestedStructureRedeclaration(mSpec, tag);
+                }
+            }
+        }
         private Type parseBaseType(SplcParser.SpecifierContext ctx) {
             if (ctx.INT() != null) return new PrimitiveType("int");
             else if (ctx.CHAR() != null) return new PrimitiveType("char");
@@ -298,14 +316,7 @@ public class Compiler extends AbstractCompiler {
                     }
 
                     // Check for nested structure redeclaration
-                    for (int i = 0; i < ctx.specifier().size(); i++) {
-                        SplcParser.SpecifierContext mSpec = ctx.specifier(i);
-                        if (mSpec.STRUCT() != null && mSpec.Identifier() != null && mSpec.LBRACE() != null) {
-                            String nestedTag = mSpec.Identifier().getText();
-                            if (nestedTag.equals(tag))
-                                grader.reportSemanticError(Project3SemanticError.redeclaration(mSpec.Identifier()));
-                        }
-                    }
+                    checkNestedStructureRedeclaration(ctx, tag);
                     st.setComplete(members);
                 }
                 return st;
@@ -349,7 +360,7 @@ public class Compiler extends AbstractCompiler {
                 TerminalNode argIdentifier = getVarDecIdentifier(args.varDec(i));
                 String argName = getVarDecName(argIdentifier);
                 if (this.curScope.lookupIdThis(argName) != null)
-                    grader.reportSemanticError(Project3SemanticError.redeclaration(argIdentifier));
+                    grader.reportSemanticError(Project3SemanticError.redefinition(argIdentifier));
 
                 Type argFullType = parseFullType(args.varDec(i), argBaseType);
                 argTypes.add(argFullType);
@@ -411,9 +422,12 @@ public class Compiler extends AbstractCompiler {
                         grader.reportSemanticError(Project3SemanticError.redefinition(varIdentifier));
 
                 Type varType = parseFullType(ctx.varDec(), baseType);
-                if (!isCompleteThis(varType))
+                if (!isComplete(varType))
                     if (varIdentifier != null)
-                        grader.reportSemanticError(Project3SemanticError.definitionIncomplete(varIdentifier));
+                        if (varType instanceof StructureType)
+                            this.incompleteIdentifiers.put(varName, varIdentifier);
+                        else
+                            grader.reportSemanticError(Project3SemanticError.definitionIncomplete(varIdentifier));
 
                 this.curScope.defineId(new Symbol(varName, varType, true));
                 this.variables.put(varName, varType);
