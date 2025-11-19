@@ -469,8 +469,8 @@ public class Compiler extends AbstractCompiler {
         @Override
         public Void visitExprID(SplcParser.ExprIDContext ctx) {
             String name = ctx.Identifier().getText();
-            Symbol sym = this.curScope.lookupId(name);
-            if (sym == null)
+            Symbol s = this.curScope.lookupId(name);
+            if (s == null)
                 grader.reportSemanticError(Project3SemanticError.undeclaredUse(ctx.Identifier()));
             return null;
         }
@@ -478,8 +478,8 @@ public class Compiler extends AbstractCompiler {
         @Override
         public Void visitExprFuncCall(SplcParser.ExprFuncCallContext ctx) {
             String name = ctx.Identifier().getText();
-            Symbol sym = this.curScope.lookupId(name);
-            if (sym == null)
+            Symbol s = this.curScope.lookupId(name);
+            if (s == null)
                 grader.reportSemanticError(Project3SemanticError.undeclaredUse(ctx.Identifier()));
             if (ctx.expression() != null)
                 for (SplcParser.ExpressionContext expr : ctx.expression()) visit(expr);
