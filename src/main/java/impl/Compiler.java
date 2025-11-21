@@ -284,7 +284,7 @@ public class Compiler extends AbstractCompiler {
             else if (ctx.CHAR() != null) return new PrimitiveType("char");
             else if (ctx.STRUCT() != null) {
                 String tag = ctx.Identifier().getText();
-                StructureType st = curScope.lookupTagThis(tag);
+                StructureType st = curScope.lookupTag(tag);  // lookupTagThis -> lookupTag, hope it works...
                 if (st == null) {
                     st = new StructureType(tag);
                     curScope.defineTag(st);
