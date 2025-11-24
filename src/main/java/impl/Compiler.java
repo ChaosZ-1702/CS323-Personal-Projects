@@ -606,57 +606,38 @@ public class Compiler extends AbstractCompiler {
 
             @Override
             public Expr visitExprPrefix(SplcParser.ExprPrefixContext ctx) {
-                // sort to get the REAL prefix...
-                List<Token> ops = new ArrayList<>();
-                if (ctx.AMP() != null) for (TerminalNode t : ctx.AMP()) ops.add(t.getSymbol());
-                if (ctx.STAR() != null) for (TerminalNode t : ctx.STAR()) ops.add(t.getSymbol());
-                if (ctx.INC() != null) for (TerminalNode t : ctx.INC()) ops.add(t.getSymbol());
-                if (ctx.DEC() != null) for (TerminalNode t : ctx.DEC()) ops.add(t.getSymbol());
-                if (ctx.PLUS() != null) for (TerminalNode t : ctx.PLUS()) ops.add(t.getSymbol());
-                if (ctx.MINUS() != null) for (TerminalNode t : ctx.MINUS()) ops.add(t.getSymbol());
-                if (ctx.NOT() != null) for (TerminalNode t : ctx.NOT()) ops.add(t.getSymbol());
-                if (ops.isEmpty()) return null;
-                ops.sort(Comparator.comparingInt(Token::getStartIndex));
-
                 Expr op = parseExpression(ctx.expression());
-                Expr newExpr = op;
-                // process layer by layer...
-                for (Token t : ops) {
-                    switch (t.getText()) {
-                        // get address
-                        case "&":
-                            if (op == null || op.valueCategory) Project4SemanticError.lvalueRequired(ctx).throwException();
-                            else newExpr = new Expr(new PointerType(newExpr.type), true);
-                            break;
-                        // unreferencing
-                        case "*":
-                            if (!(op.type instanceof PointerType))
-                                Project4SemanticError.unexpectedType(ctx, op.type).throwException();
-                            else newExpr = new Expr(((PointerType) newExpr.type).referenceType, false);
-                            break;
-                        // self increasing/decreasing
-                        case "++":
-                        case "--":
-                            if (!isInteger(op) && !isPointer(op))
-                                Project4SemanticError.unexpectedType(ctx, op.type).throwException();
-                            else if (op.valueCategory)
-                                Project4SemanticError.lvalueRequired(ctx).throwException();
-                            else newExpr = new Expr(newExpr.type, true);
-                            break;
-                        // unary plus/minus
-                        case "+":
-                        case "-":
-                            if (!isInteger(op)) Project4SemanticError.unexpectedType(ctx, op.type).throwException();
-                            else newExpr = new Expr(new PrimitiveType("int"), true);
-                            break;
-                        // logical not
-                        case "!":
-                            if (!isInteger(op) && !isPointer(op))
-                                Project4SemanticError.unexpectedType(ctx, op.type).throwException();
-                            else newExpr = new Expr(new PrimitiveType("int"), true);
-                    }
+                // get address
+                if (ctx.AMP() != null) {
+                    if (op == null || op.valueCategory) Project4SemanticError.lvalueRequired(ctx).throwException();
+                    else return new Expr(new PointerType(op.type), true);
                 }
-                return newExpr;
+                // unreferencing
+                else if (ctx.STAR() != null) {
+                    if (!(op.type instanceof PointerType))
+                        Project4SemanticError.unexpectedType(ctx, op.type);
+                    else return new Expr(((PointerType) op.type).referenceType, false);
+                }
+                // self increasing/decreasing
+                else if (ctx.INC() != null || ctx.DEC() != null) {
+                    if (!isInteger(op) && !isPointer(op))
+                        Project4SemanticError.unexpectedType(ctx, op.type).throwException();
+                    else if (op.valueCategory)
+                        Project4SemanticError.lvalueRequired(ctx).throwException();
+                    else return new Expr(op.type, true);
+                }
+                // unary plus/minus
+                else if (ctx.PLUS() != null || ctx.MINUS() != null) {
+                    if (!isInteger(op)) Project4SemanticError.unexpectedType(ctx, op.type).throwException();
+                    else return new Expr(new PrimitiveType("int"), true);
+                }
+                // logical not
+                else if (ctx.NOT() != null) {
+                    if (!isInteger(op) && !isPointer(op))
+                        Project4SemanticError.unexpectedType(ctx, op.type);
+                    else return new Expr(new PrimitiveType("int"), true);
+                }
+                return null;
             }
 
             @Override
@@ -735,9 +716,9 @@ public class Compiler extends AbstractCompiler {
                         Project4SemanticError.unmatchedTypeForBinaryOP(ctx, token, lhs.type, rhs.type).throwException();
                     }
                 }
-                else if (!isInteger(lhs) && !isPointer(lhs))
-                    Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
-                else Project4SemanticError.unexpectedType(ctx, rhs.type).throwException();
+                Token token = ctx.PLUS() != null ? ctx.PLUS().getSymbol()
+                        : (ctx.MINUS() != null ? ctx.MINUS().getSymbol() : null);
+                Project4SemanticError.unmatchedTypeForBinaryOP(ctx, token, lhs.type, rhs.type).throwException();
                 return null;
             }
 
