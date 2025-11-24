@@ -45,7 +45,7 @@ expression: Identifier # exprID |
     Identifier LPAREN (expression (COMMA expression)*)? RPAREN # exprFuncCall |
     expression LBRACK expression RBRACK # exprArray |
     expression (DOT | ARROW) Identifier # exprStructure |
-    (INC | DEC | PLUS | MINUS | NOT | STAR | AMP)+ expression # exprPrefix |
+    (INC | DEC | PLUS | MINUS | NOT | STAR | AMP) expression # exprPrefix |
     expression (STAR | DIV | MOD) expression # exprSDM |
     expression (PLUS | MINUS) expression # exprPM |
     expression (LT | LE | GT | GE) expression # exprCompare |
