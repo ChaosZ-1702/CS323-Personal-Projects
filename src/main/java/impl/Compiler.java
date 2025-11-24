@@ -55,23 +55,24 @@ public class Compiler extends AbstractCompiler {
         myVisitor v = new myVisitor();
         v.visit(program);
 
-        for (Map.Entry<String, Type> vs : v.variables.entrySet())
-            if (vs.getValue() instanceof StructureType st) {
-                if (!st.isComplete && v.incompleteIdentifiers.containsKey(vs.getKey()))
-                    grader.reportSemanticError(Project3SemanticError.definitionIncomplete(v.incompleteIdentifiers.get(vs.getKey())));
-            }
-
-        if (!v.hasError) {
-            grader.print("Variables:\n");
-            for (Map.Entry<String, Type> vs : v.variables.entrySet())
-                grader.print(vs.getKey() + ": " + vs.getValue().fullPrint() + "\n");
-
-            grader.print("\n");
-
-            grader.print("Functions:\n");
-            for (Map.Entry<String, FunctionType> vs : v.functions.entrySet())
-                grader.print(vs.getKey() + ": " + vs.getValue().prettyPrint() + "\n");
-        }
+        // for project 4, we don't need the outputs in project 3...
+//        for (Map.Entry<String, Type> vs : v.variables.entrySet())
+//            if (vs.getValue() instanceof StructureType st) {
+//                if (!st.isComplete && v.incompleteIdentifiers.containsKey(vs.getKey()))
+//                    grader.reportSemanticError(Project3SemanticError.definitionIncomplete(v.incompleteIdentifiers.get(vs.getKey())));
+//            }
+//
+//        if (!v.hasError) {
+//            grader.print("Variables:\n");
+//            for (Map.Entry<String, Type> vs : v.variables.entrySet())
+//                grader.print(vs.getKey() + ": " + vs.getValue().fullPrint() + "\n");
+//
+//            grader.print("\n");
+//
+//            grader.print("Functions:\n");
+//            for (Map.Entry<String, FunctionType> vs : v.functions.entrySet())
+//                grader.print(vs.getKey() + ": " + vs.getValue().prettyPrint() + "\n");
+//        }
     }
 
     // Type Systemmmmmmmmm
