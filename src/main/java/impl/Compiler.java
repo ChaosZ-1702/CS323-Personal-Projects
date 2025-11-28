@@ -62,8 +62,7 @@ public class Compiler extends AbstractCompiler {
 //                    grader.reportSemanticError(Project3SemanticError.definitionIncomplete(v.incompleteIdentifiers.get(vs.getKey())));
 //            }
 //
-//        if (!v.hasError) {
-//            grader.print("Variables:\n");
+//        grader.print("Variables:\n");
 //            for (Map.Entry<String, Type> vs : v.variables.entrySet())
 //                grader.print(vs.getKey() + ": " + vs.getValue().fullPrint() + "\n");
 //
@@ -72,7 +71,6 @@ public class Compiler extends AbstractCompiler {
 //            grader.print("Functions:\n");
 //            for (Map.Entry<String, FunctionType> vs : v.functions.entrySet())
 //                grader.print(vs.getKey() + ": " + vs.getValue().prettyPrint() + "\n");
-//        }
     }
 
     // Type Systemmmmmmmmm
@@ -244,7 +242,6 @@ public class Compiler extends AbstractCompiler {
         LinkedHashMap<String, FunctionType> functions;
         LinkedHashMap<String, TerminalNode> incompleteIdentifiers;
         ArrayDeque<FunctionType> functionStack;
-        boolean hasError;
 
         public myVisitor() {
             this.fileScope = new Scope(null);
@@ -253,7 +250,6 @@ public class Compiler extends AbstractCompiler {
             this.functions = new LinkedHashMap<>();
             this.incompleteIdentifiers = new LinkedHashMap<>();
             this.functionStack = new ArrayDeque<>();
-            this.hasError = false;
             this.enterScope(fileScope);
         }
 
@@ -792,7 +788,6 @@ public class Compiler extends AbstractCompiler {
                     }
                 }
                 catch (Project4Exception e) {
-                    this.hasError = true;
                     grader.reportSemanticError(e);
                 }
             }
@@ -808,7 +803,6 @@ public class Compiler extends AbstractCompiler {
                     if (!isInteger(expr) && !isPointer(expr))
                         Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
                 } catch (Project4Exception e) {
-                    this.hasError = true;
                     grader.reportSemanticError(e);
                 }
             }
@@ -826,7 +820,6 @@ public class Compiler extends AbstractCompiler {
                     if (!isInteger(expr) && !isPointer(expr))
                         Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
                 } catch (Project4Exception e) {
-                    this.hasError = true;
                     grader.reportSemanticError(e);
                 }
             }
@@ -845,7 +838,6 @@ public class Compiler extends AbstractCompiler {
                         if (!expected.equals(expr.type)) Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
                     }
                 } catch (Project4Exception e) {
-                    this.hasError = true;
                     grader.reportSemanticError(e);
                 }
             }
@@ -854,7 +846,6 @@ public class Compiler extends AbstractCompiler {
                     try {
                         Project4SemanticError.unexpectedType(ctx.expression(), expected).throwException();
                     } catch (Project4Exception e) {
-                        this.hasError = true;
                         grader.reportSemanticError(e);
                     }
                 }
@@ -867,7 +858,6 @@ public class Compiler extends AbstractCompiler {
             try {
                 new ExprVisitor().visit(ctx.expression());
             } catch (Project4Exception e) {
-                this.hasError = true;
                 grader.reportSemanticError(e);
             }
             return null;
