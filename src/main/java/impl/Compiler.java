@@ -703,7 +703,7 @@ public class Compiler extends AbstractCompiler {
                     return new Expr(lhs.type, true);
                 else if (isPointer(lhs) && isPointer(rhs)) {
                     // pointer - pointer is allowed
-                    if (ctx.PLUS() == null) {
+                    if (ctx.MINUS() != null) {
                         if (lhs.type.equals(rhs.type))
                             return new Expr(new PrimitiveType("int"), true);
                         else {
@@ -785,9 +785,11 @@ public class Compiler extends AbstractCompiler {
             if (ctx.ASSIGN() != null) {
                 try {
                     Expr expr = new ExprVisitor().visit(ctx.expression());
-                    if (!(varType.equals(expr.type) ||
-                            (varType instanceof PointerType && isNullPointer(ctx.expression()))))
-                        Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
+                    if (!(varType instanceof PrimitiveType && ((PrimitiveType) varType).name.equals("int") && varType.equals(expr.type))
+                        && !(varType instanceof PointerType && (varType.equals(expr.type) || isNullPointer(ctx.expression())))) {
+                        Token token = ctx.ASSIGN().getSymbol();
+                        Project4SemanticError.unmatchedTypeForBinaryOP(ctx.expression(), token, varType, expr.type).throwException();
+                    }
                 }
                 catch (Project4Exception e) {
                     this.hasError = true;
