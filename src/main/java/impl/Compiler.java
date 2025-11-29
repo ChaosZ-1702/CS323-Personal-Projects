@@ -557,6 +557,7 @@ public class Compiler extends AbstractCompiler {
             public Expr visitExprCompare(SplcParser.ExprCompareContext ctx) {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
+                if (lhs == null || rhs == null) return null;
                 if ((isInteger(lhs) && isInteger(rhs)))
                     return new Expr(new PrimitiveType("int"), true);
                 else {
