@@ -640,16 +640,19 @@ public class Compiler extends AbstractCompiler {
             @Override
             public Expr visitExprStructure(SplcParser.ExprStructureContext ctx) {
                 Expr lhs = parseExpression(ctx.expression());
+                if (lhs == null) return null;
                 String member = ctx.Identifier().getText();
-                // Structure Access
+                // Structure Member Access
                 if (ctx.DOT() != null) {
                     if (!(lhs.type instanceof StructureType) || !((StructureType) lhs.type).isComplete)
                         Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
+                    else if (lhs.valueCategory)
+                        Project4SemanticError.lvalueRequired(ctx).throwException();
                     else if (((StructureType) lhs.type).members.get(member) == null)
                         Project4SemanticError.badMember(ctx, lhs.type, member).throwException();
                     return new Expr(((StructureType) lhs.type).members.get(member), false);
                 }
-                // Structure Member Access
+                // Structure Pointer Access
                 else {
                     if (!(lhs.type instanceof PointerType))
                         Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
