@@ -792,11 +792,14 @@ public class Compiler extends AbstractCompiler {
             // Project 4 -- local varDec semantics
             if (ctx.ASSIGN() != null) {
                 try {
-                    Expr expr = new ExprVisitor().visit(ctx.expression());
-                    if (!(varType instanceof PrimitiveType && ((PrimitiveType) varType).name.equals("int") && varType.equals(expr.type))
-                        && !(varType instanceof PointerType && (varType.equals(expr.type) || isNullPointer(ctx.expression())))) {
+                    Expr rhs = new ExprVisitor().visit(ctx.expression());
+                    if (rhs == null) return null;
+                    Expr lhs = new Expr(varType, false);
+                    if (!((isInteger(lhs) && isInteger(rhs)) ||
+                            (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type)) ||
+                            (isPointer(lhs) && isNullPointer(ctx.expression())))) {
                         Token token = ctx.ASSIGN().getSymbol();
-                        Project4SemanticError.unmatchedTypeForBinaryOP(ctx.expression(), token, varType, expr.type).throwException();
+                        Project4SemanticError.unmatchedTypeForBinaryOP(ctx.expression(), token, lhs.type, rhs.type).throwException();
                     }
                 }
                 catch (Project4Exception e) {
