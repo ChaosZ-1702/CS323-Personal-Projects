@@ -594,6 +594,7 @@ public class Compiler extends AbstractCompiler {
             public Expr visitExprOr(SplcParser.ExprOrContext ctx) {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
+                if (lhs == null || rhs == null) return null;
                 if (!isInteger(lhs) && !isPointer(lhs))
                     Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
                 if (!isInteger(rhs) && !isPointer(rhs))
@@ -670,6 +671,7 @@ public class Compiler extends AbstractCompiler {
             public Expr visitExprAnd(SplcParser.ExprAndContext ctx) {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
+                if (lhs == null || rhs == null) return null;
                 if (!isInteger(lhs) && !isPointer(lhs))
                     Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
                 if (!isInteger(rhs) && !isPointer(rhs))
