@@ -536,12 +536,13 @@ public class Compiler extends AbstractCompiler {
             public Expr visitExprAssign(SplcParser.ExprAssignContext ctx) {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
-                if (lhs == null || lhs.valueCategory) Project4SemanticError.lvalueRequired(ctx).throwException();
+                if (lhs == null || rhs == null) return null;
+                if (lhs.valueCategory) Project4SemanticError.lvalueRequired(ctx).throwException();
                 if ((isInteger(lhs) && isInteger(rhs)) ||
                         (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type)))
-                    return new Expr(rhs.type, false);
+                    return new Expr(rhs.type, true);
                 else if (isPointer(lhs) && isNullPointer(ctx.expression(1)))
-                    return new Expr(lhs.type, false);
+                    return new Expr(lhs.type, true);
                 else {
                     Token token = (ctx.ASSIGN() != null ? ctx.ASSIGN().getSymbol() : null);
                     Project4SemanticError.unmatchedTypeForBinaryOP(ctx, token, lhs.type, rhs.type).throwException();
