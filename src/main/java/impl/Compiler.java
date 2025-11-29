@@ -604,15 +604,16 @@ public class Compiler extends AbstractCompiler {
             @Override
             public Expr visitExprPrefix(SplcParser.ExprPrefixContext ctx) {
                 Expr op = parseExpression(ctx.expression());
+                if (op == null) return null;
                 // get address
                 if (ctx.AMP() != null) {
-                    if (op == null || op.valueCategory) Project4SemanticError.lvalueRequired(ctx).throwException();
+                    if (op.valueCategory) Project4SemanticError.lvalueRequired(ctx).throwException();
                     else return new Expr(new PointerType(op.type), true);
                 }
                 // unreferencing
                 else if (ctx.STAR() != null) {
                     if (!(op.type instanceof PointerType))
-                        Project4SemanticError.unexpectedType(ctx, op.type);
+                        Project4SemanticError.unexpectedType(ctx, op.type).throwException();
                     else return new Expr(((PointerType) op.type).referenceType, false);
                 }
                 // self increasing/decreasing
@@ -631,7 +632,7 @@ public class Compiler extends AbstractCompiler {
                 // logical not
                 else if (ctx.NOT() != null) {
                     if (!isInteger(op) && !isPointer(op))
-                        Project4SemanticError.unexpectedType(ctx, op.type);
+                        Project4SemanticError.unexpectedType(ctx, op.type).throwException();
                     else return new Expr(new PrimitiveType("int"), true);
                 }
                 return null;
@@ -725,6 +726,7 @@ public class Compiler extends AbstractCompiler {
             @Override
             public Expr visitExprSuffix(SplcParser.ExprSuffixContext ctx) {
                 Expr op = parseExpression(ctx.expression());
+                if (op == null) return null;
                 if (!isInteger(op) && !isPointer(op))
                     Project4SemanticError.unexpectedType(ctx, op.type).throwException();
                 else if (op.valueCategory)
