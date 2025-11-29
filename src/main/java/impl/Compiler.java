@@ -744,6 +744,7 @@ public class Compiler extends AbstractCompiler {
             public Expr visitExprArray(SplcParser.ExprArrayContext ctx) {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
+                if (lhs == null || rhs == null) return null;
                 if (!(lhs.type instanceof ArrayType || lhs.type instanceof PointerType))
                     Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
                 if (lhs.type instanceof ArrayType && lhs.valueCategory)
