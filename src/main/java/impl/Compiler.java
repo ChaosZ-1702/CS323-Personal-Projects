@@ -519,11 +519,12 @@ public class Compiler extends AbstractCompiler {
             public Expr visitExprEQ(SplcParser.ExprEQContext ctx) {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
+                if (lhs == null || rhs == null) return null;
                 if ((isInteger(lhs) && isInteger(rhs)) ||
                         (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type)) ||
                         (isPointer(lhs) && isNullPointer(ctx.expression(1))) ||
                         (isNullPointer(ctx.expression(0)) && isPointer(rhs)))
-                    return new Expr(new PrimitiveType("int"), false);
+                    return new Expr(new PrimitiveType("int"), true);
                 else {
                     Token token = (ctx.EQ() != null ? ctx.EQ().getSymbol() : (ctx.NEQ() != null ? ctx.NEQ().getSymbol() : null));
                     Project4SemanticError.unmatchedTypeForBinaryOP(ctx, token, lhs.type, rhs.type).throwException();
