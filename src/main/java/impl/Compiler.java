@@ -125,7 +125,8 @@ public class Compiler extends AbstractCompiler {
         }
         // Project 4 -- Type Equality
         public boolean equals(Object t) {
-            return t instanceof ArrayType && this.elementType.equals(((ArrayType) t).elementType);
+            return t instanceof ArrayType && this.elementType.equals(((ArrayType) t).elementType)
+                    && this.length == ((ArrayType) t).length;
         }
     }
 
