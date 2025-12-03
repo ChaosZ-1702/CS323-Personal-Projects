@@ -14,38 +14,57 @@ grammar Splc;
 
 program: globalDef* EOF;
 
-globalDef: specifier Identifier LPAREN funcArgs RPAREN LBRACE statement* RBRACE |
-    specifier varDec SEMI |
-    specifier SEMI;
+globalDef
+    : specifier Identifier LPAREN funcArgs RPAREN LBRACE statement* RBRACE
+    | specifier varDec SEMI
+    | specifier SEMI
+    | specifier Identifier LPAREN funcArgs RPAREN SEMI
+    ;
 
-specifier: INT | CHAR |
-    STRUCT Identifier | STRUCT Identifier LBRACE (specifier varDec SEMI)* RBRACE;
+specifier
+    : INT
+    | CHAR
+    | STRUCT Identifier
+    | STRUCT Identifier LBRACE (specifier varDec SEMI)* RBRACE
+    ;
 
-varDec: Identifier | varDec LBRACK Number RBRACK | STAR varDec | LPAREN varDec RPAREN;
+
+varDec
+    : Identifier  # varDecBase
+    | varDec LBRACK Number RBRACK  # varDecArray
+    | STAR varDec  # varDecPointer
+    | LPAREN varDec RPAREN  # varDecComb
+    ;
 
 funcArgs: (specifier varDec(COMMA specifier varDec)*)?;
 
-statement:
-    LBRACE statement* RBRACE  # blockStmt  |
-    specifier varDec (ASSIGN expression)? SEMI  # varDecStmt |
-    IF LPAREN expression RPAREN statement (ELSE statement)?  # ifStmt |
-    WHILE LPAREN expression RPAREN statement  # whileStmt |
-    RETURN expression? SEMI  # returnStmt |
-    expression SEMI  # exprStmt;
+statement
+    : LBRACE statement* RBRACE  # blockStmt
+    | specifier varDec (ASSIGN expression)? SEMI  # varDecStmt
+    | IF LPAREN expression RPAREN statement (ELSE statement)?# ifStmt
+    | WHILE LPAREN expression RPAREN statement  # whileStmt
+    | RETURN expression? SEMI  # returnStmt
+    | expression SEMI  # exprStmt
+    ;
 
-expression: Identifier | Number | Char | LPAREN expression RPAREN |
-    expression (INC | DEC) |
-    Identifier LPAREN (expression (COMMA expression)*)? RPAREN |
-    expression LBRACK expression RBRACK |
-    expression (DOT | ARROW) Identifier |
-    (INC | DEC | PLUS | MINUS | NOT | STAR | AMP)+ expression |
-    expression (STAR | DIV | MOD) expression |
-    expression (PLUS | MINUS) expression |
-    expression (LT | LE | GT | GE) expression |
-    expression (EQ | NEQ) expression |
-    expression (AND) expression |
-    expression (OR) expression |
-    expression ASSIGN expression;
+expression
+    : Identifier  # exprID
+    | Number  # exprNum
+    | Char  # exprChar
+    | LPAREN expression RPAREN  # exprParen
+    | expression (INC | DEC)  # exprSuffix
+    | Identifier LPAREN (expression (COMMA expression)*)? RPAREN  # exprFuncCall
+    | expression LBRACK expression RBRACK  # exprArray
+    | expression (DOT | ARROW) Identifier  # exprStructure
+    | (INC | DEC | PLUS | MINUS | NOT | STAR | AMP) expression  # exprPrefix
+    | expression (STAR | DIV | MOD) expression  # exprSDM
+    | expression (PLUS | MINUS) expression  # exprPM
+    | expression (LT | LE | GT | GE) expression  # exprCompare
+    | expression (EQ | NEQ) expression  # exprEQ
+    | expression AND expression  # exprAnd
+    | expression OR expression  # exprOr
+    | expression ASSIGN expression  # exprAssign
+    ;
 
 // =========================
 // Lexer Rules
