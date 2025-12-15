@@ -3,6 +3,7 @@ package impl;
 import framework.AbstractCompiler;
 import framework.AbstractGrader;
 import framework.lang.Type;
+import framework.llvm.*;
 import framework.project3.Project3SemanticError;
 import framework.project4.Project4Exception;
 import framework.project4.Project4SemanticError;
@@ -13,12 +14,15 @@ import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.misc.Pair;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
 import java.io.IOException;
 import java.util.*;
 
 public class Compiler extends AbstractCompiler {
+    IRBuilder irBuilder = new IRBuilder();
+
     public Compiler(AbstractGrader grader) {
         super(grader);
     }
@@ -30,7 +34,6 @@ public class Compiler extends AbstractCompiler {
         CommonTokenStream tokens = new CommonTokenStream(lexer);
         SplcParser parser = new SplcParser(tokens);
 
-        // TODO: XXX
         SplcParser.ProgramContext program = parser.program();
 
 //        new SplcBaseVisitor<Void>() {
@@ -54,6 +57,7 @@ public class Compiler extends AbstractCompiler {
 
         myVisitor v = new myVisitor();
         v.visit(program);
+        grader.printIR(irBuilder);
 
         // for project 4, we don't need the outputs in project 3...
 //        for (Map.Entry<String, Type> vs : v.variables.entrySet())
@@ -243,6 +247,9 @@ public class Compiler extends AbstractCompiler {
         LinkedHashMap<String, FunctionType> functions;
         LinkedHashMap<String, TerminalNode> incompleteIdentifiers;
         ArrayDeque<FunctionType> functionStack;
+        FunctionBuilder curFunc;
+        BasicBlockBuilder curBlock;
+        Map<String, IRValue> varAddrs = new HashMap<>();
 
         public myVisitor() {
             this.fileScope = new Scope(null);
@@ -343,6 +350,11 @@ public class Compiler extends AbstractCompiler {
                     // Check for nested structure redeclaration
                     checkNestedStructureRedeclaration(ctx, tag);
                     st.setComplete(members);
+                    List<IRType> elements = new ArrayList<>();
+                    for (Type type : members.values()) {
+                        elements.add(getIr(type));
+                    }
+                    irBuilder.defineStructure(tag, elements);
                 }
                 return st;
             }
@@ -415,6 +427,24 @@ public class Compiler extends AbstractCompiler {
                 this.curScope.defineId(new Symbol(funcName, thisFunction, true));  // fileScope
                 this.functions.put(funcName, thisFunction);
 
+                IRType retTy = getIr(thisFunction.returnType);
+
+                List<Pair<String, IRType>> irArgs = new ArrayList<>();
+                for (Map.Entry<String, Symbol> e : funcArgScope.identifiers.entrySet()) {
+                    String argName = e.getKey();
+                    Type argType = e.getValue().type;
+                    IRType argIrType = getIr(argType);
+                    irArgs.add(new Pair<>(argName, argIrType));
+                }
+
+                curFunc = irBuilder.defineFunction(funcName, retTy, irArgs);
+                curBlock = curFunc.rootBlock();
+                varAddrs = new HashMap<>();
+
+                for (String argName : funcArgScope.identifiers.keySet()) {
+                    varAddrs.put(argName, curFunc.param(argName)); 
+                }
+
                 this.functionStack.push(thisFunction);
                 Scope funcBodyScope = new Scope(this.curScope);
                 enterScope(funcBodyScope);
@@ -424,6 +454,10 @@ public class Compiler extends AbstractCompiler {
                     visit(stmt);
                 exitScope();
                 this.functionStack.pop();
+
+                curFunc = null;
+                curBlock = null;
+                varAddrs = null;
             }
             // declaration
             else if (ctx.funcArgs() != null) {
@@ -438,7 +472,17 @@ public class Compiler extends AbstractCompiler {
                 FunctionType thisFunction = new FunctionType(baseType, funcArgTypes);
                 this.curScope.defineId(new Symbol(funcName, thisFunction, false));  // fileScope
                 this.functions.put(funcName, thisFunction);
+                IRType retTy = getIr(thisFunction.returnType);
+                List<Pair<String, IRType>> irArgs = new ArrayList<>();
+                for (Map.Entry<String, Symbol> e : funcArgScope.identifiers.entrySet()) {
+                    String argName = e.getKey();
+                    Type argType = e.getValue().type;
+                    IRType argIrType = getIr(argType);
+                    irArgs.add(new Pair<>(argName, argIrType));
+                }
+                irBuilder.declareFunction(funcName, retTy, irArgs);
             }
+            // 全局变量声明
             else if (ctx.varDec() != null) {
                 TerminalNode varIdentifier = getVarDecIdentifier(ctx.varDec());
                 String varName = getVarDecName(varIdentifier);
@@ -458,6 +502,7 @@ public class Compiler extends AbstractCompiler {
 
                 this.curScope.defineId(new Symbol(varName, varType, true));
                 this.variables.put(varName, varType);
+                irBuilder.defineGlobalVar(varName, getIr(varType));
             }
 
             return null;
@@ -485,10 +530,16 @@ public class Compiler extends AbstractCompiler {
         private static class Expr {
             Type type;
             boolean valueCategory;  // 0 -> lvalue, 1 -> rvalue
+            IRValue value;
 
-            public Expr(Type type, boolean valueCategory) {
+//            public Expr(Type type, boolean valueCategory) {
+//                this.type = type;
+//                this.valueCategory = valueCategory;
+//            }
+            public Expr(Type type, boolean valueCategory, IRValue value) {
                 this.type = type;
                 this.valueCategory = valueCategory;
+                this.value = value;
             }
         }
         // Expression Semantic Check
@@ -524,8 +575,34 @@ public class Compiler extends AbstractCompiler {
                 if ((isInteger(lhs) && isInteger(rhs)) ||
                         (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type)) ||
                         (isPointer(lhs) && isNullPointer(ctx.expression(1))) ||
-                        (isNullPointer(ctx.expression(0)) && isPointer(rhs)))
-                    return new Expr(new PrimitiveType("int"), true);
+                        (isNullPointer(ctx.expression(0)) && isPointer(rhs))) {
+                    IRValue lVal = lhs.value;
+                    IRValue rVal = rhs.value;
+                    IRType lTy = getIr(lhs.type);
+                    IRType rTy = getIr(rhs.type);
+
+                    if (!lhs.valueCategory) {
+                        lVal = curBlock.load(lhs.value, lTy, "loadLhs");
+                    }
+                    if (!rhs.valueCategory) {
+                        rVal = curBlock.load(rhs.value, rTy, "loadRhs");
+                    }
+
+                    LLVMIcmpPredicate pred;
+                    if (ctx.EQ() != null) {
+                        pred = LLVMIcmpPredicate.Equals;
+                    } else {
+                        pred = LLVMIcmpPredicate.NotEquals;
+                    }
+                    IRValue cmp = curBlock.icmp(lVal, pred, rVal, "cmp");
+
+                    // zext i1 -> i32 !!!是否有必要
+                    //
+                    //
+                    IRValue value = curBlock.zext(cmp, IRType.int32(), "toi32");
+
+                    return new Expr(new PrimitiveType("int"), true, value);
+                }
                 else {
                     Token token = (ctx.EQ() != null ? ctx.EQ().getSymbol() : (ctx.NEQ() != null ? ctx.NEQ().getSymbol() : null));
                     Project4SemanticError.unmatchedTypeForBinaryOP(ctx, token, lhs.type, rhs.type).throwException();
@@ -539,11 +616,17 @@ public class Compiler extends AbstractCompiler {
                 Expr rhs = parseExpression(ctx.expression(1));
                 if (lhs == null || rhs == null) return null;
                 if (lhs.valueCategory) Project4SemanticError.lvalueRequired(ctx).throwException();
+                IRValue rVal = rhs.valueCategory ? rhs.value : curBlock.load(rhs.value, getIr(rhs.type), "loadR");
                 if ((isInteger(lhs) && isInteger(rhs)) ||
-                        (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type)))
-                    return new Expr(rhs.type, true);
-                else if (isPointer(lhs) && isNullPointer(ctx.expression(1)))
-                    return new Expr(lhs.type, true);
+                        (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type))) {
+                    curBlock.store(lhs.value, getIr(lhs.type), rVal);
+                    return new Expr(rhs.type, true, rVal);
+                }
+                else if (isPointer(lhs) && isNullPointer(ctx.expression(1))){
+                    IRValue nullVal = IRValue.constNull();
+                    curBlock.store(lhs.value, getIr(lhs.type), nullVal);
+                    return new Expr(lhs.type, true, nullVal);
+                }
                 else {
                     Token token = (ctx.ASSIGN() != null ? ctx.ASSIGN().getSymbol() : null);
                     Project4SemanticError.unmatchedTypeForBinaryOP(ctx, token, lhs.type, rhs.type).throwException();
@@ -553,7 +636,10 @@ public class Compiler extends AbstractCompiler {
 
             @Override
             public Expr visitExprNum(SplcParser.ExprNumContext ctx) {
-                return new Expr(new PrimitiveType("int"), true);
+                String text = ctx.Number().getText();
+                int num = Integer.parseInt(text);  
+                IRValue value = IRValue.consti32(num); 
+                return new Expr(new PrimitiveType("int"), true, value);
             }
 
             @Override
@@ -561,8 +647,31 @@ public class Compiler extends AbstractCompiler {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
                 if (lhs == null || rhs == null) return null;
-                if ((isInteger(lhs) && isInteger(rhs)))
-                    return new Expr(new PrimitiveType("int"), true);
+                if ((isInteger(lhs) && isInteger(rhs))) {
+                    IRType ty = getIr(lhs.type);
+                    IRValue lVal = lhs.value;
+                    IRValue rVal = rhs.value;
+                    if (!lhs.valueCategory) {
+                        lVal = curBlock.load(lhs.value, ty, "loadLhs");
+                    }
+                    if (!rhs.valueCategory) {
+                        rVal = curBlock.load(rhs.value, ty, "loadRhs");
+                    }
+                    LLVMIcmpPredicate pred;
+                    if (ctx.LT() != null) {
+                        pred = LLVMIcmpPredicate.SignedLT;
+                    } else if (ctx.LE() != null) {
+                        pred = LLVMIcmpPredicate.SignedLE;
+                    } else if (ctx.GT() != null) {
+                        pred = LLVMIcmpPredicate.SignedGT;
+                    } else {
+                        pred = LLVMIcmpPredicate.SignedGE;
+                    }
+
+                    IRValue cmp = curBlock.icmp(lVal, pred, rVal, "cmp");
+                    IRValue value = curBlock.zext(cmp, IRType.int32(), "toi32");
+                    return new Expr(new PrimitiveType("int"), true, value);
+                }
                 else {
                     Project4SemanticError.unexpectedType(ctx,
                             !isInteger(lhs) ? lhs.type : rhs.type).throwException();
@@ -576,17 +685,29 @@ public class Compiler extends AbstractCompiler {
                 Symbol s = curScope.lookupId(name);
                 if (s == null || !(s.type instanceof FunctionType))
                     Project4SemanticError.identifierNotFunction(ctx, name).throwException();
-                int requires = ((FunctionType) s.type).parameterTypes.size();
+
+                FunctionType ft = (FunctionType) s.type;
+                int requires = ft.parameterTypes.size();
                 int given = ctx.expression() != null ? ctx.expression().size() : 0;
                 if (requires != given) Project4SemanticError.badParamCount(ctx, requires, given).throwException();
-                if (ctx.expression() != null)
+
+                List<IRValue> args = new ArrayList<>();
+                if (ctx.expression() != null) {
                     for (int i = 0; i < ctx.expression().size(); i++) {
                         Expr paramExpr = parseExpression(ctx.expression(i));
-                        Type paramType = ((FunctionType) s.type).parameterTypes.get(i);
+                        Type paramType = ft.parameterTypes.get(i);
                         if (paramExpr == null || !paramExpr.type.equals(paramType))
                             Project4SemanticError.badParamType(ctx, i + 1).throwException();
+                        IRValue value = paramExpr.valueCategory
+                            ? paramExpr.value
+                            : curBlock.load(paramExpr.value, getIr(paramExpr.type), null);
+                        args.add(value);
                     }
-                return new Expr(((FunctionType) s.type).returnType, true);
+                }
+
+                IRType rt = getIr(ft.returnType);
+                IRValue callVal = curBlock.call(rt, name, args, null);
+                return new Expr(ft.returnType, true, callVal);
             }
 
             @Override
@@ -597,13 +718,56 @@ public class Compiler extends AbstractCompiler {
             @Override
             public Expr visitExprOr(SplcParser.ExprOrContext ctx) {
                 Expr lhs = parseExpression(ctx.expression(0));
-                Expr rhs = parseExpression(ctx.expression(1));
-                if (lhs == null || rhs == null) return null;
+                if (lhs == null) return null;
                 if (!isInteger(lhs) && !isPointer(lhs))
                     Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
+
+                IRValue zero = IRValue.consti32(0);
+                IRValue nullVal = IRValue.constNull();
+
+                IRValue lVal = lhs.valueCategory
+                        ? lhs.value
+                        : curBlock.load(lhs.value, getIr(lhs.type), "loadL");
+                IRValue lCond;
+                if (isInteger(lhs)) {
+                    lCond = curBlock.icmp(lVal, LLVMIcmpPredicate.NotEquals, zero, "lcond");
+                } else {
+                    lCond = curBlock.icmp(lVal, LLVMIcmpPredicate.NotEquals, nullVal, "lcond");
+                }
+
+                IRValue one = IRValue.consti32(1);
+                IRValue resAddr = curBlock.alloca(IRType.int32(), "or.tmp");
+                curBlock.store(resAddr, IRType.int32(), one);
+
+                BasicBlockBuilder rhsBlock = curFunc.newBasicBlock("or.rhs");
+                BasicBlockBuilder endBlock = curFunc.newBasicBlock("or.end");
+                curBlock.condBr(lCond, endBlock, rhsBlock);
+                //lCond为真时直接进入endBlock，且此时resAddr对应值为1
+                //进入rhsBlock后若rCond为否，则更新resAddr对应值为0
+
+                curBlock = rhsBlock;
+                Expr rhs = parseExpression(ctx.expression(1));
+                if (rhs == null) return null;
                 if (!isInteger(rhs) && !isPointer(rhs))
                     Project4SemanticError.unexpectedType(ctx, rhs.type).throwException();
-                return new Expr(new PrimitiveType("int"), true);
+
+                IRValue rVal = rhs.valueCategory
+                        ? rhs.value
+                        : curBlock.load(rhs.value, getIr(rhs.type), "loadR");
+                IRValue rCond;
+                if (isInteger(rhs)) {
+                    rCond = curBlock.icmp(rVal, LLVMIcmpPredicate.NotEquals, zero, "rcond");
+                } else {
+                    rCond = curBlock.icmp(rVal, LLVMIcmpPredicate.NotEquals, nullVal, "rcond");
+                }
+
+                IRValue rInt = curBlock.zext(rCond, IRType.int32(), null);
+                curBlock.store(resAddr, IRType.int32(), rInt);
+
+                curBlock.br(endBlock);
+                curBlock = endBlock;
+                IRValue resVal = curBlock.load(resAddr, IRType.int32(), "or.res");
+                return new Expr(new PrimitiveType("int"), true, resVal);
             }
 
             @Override
@@ -613,13 +777,17 @@ public class Compiler extends AbstractCompiler {
                 // get address
                 if (ctx.AMP() != null) {
                     if (op.valueCategory) Project4SemanticError.lvalueRequired(ctx).throwException();
-                    else return new Expr(new PointerType(op.type), true);
+                    else return new Expr(new PointerType(op.type), true, op.value);
                 }
                 // unreferencing
                 else if (ctx.STAR() != null) {
                     if (!(op.type instanceof PointerType))
                         Project4SemanticError.unexpectedType(ctx, op.type).throwException();
-                    else return new Expr(((PointerType) op.type).referenceType, false);
+                    PointerType pt = (PointerType) op.type;
+                    IRValue ptrVal = op.valueCategory ? op.value 
+                        : curBlock.load(op.value, IRType.pointer(), null);
+                    
+                    return new Expr(pt.referenceType, false, ptrVal);
                 }
                 // self increasing/decreasing
                 else if (ctx.INC() != null || ctx.DEC() != null) {
@@ -627,18 +795,66 @@ public class Compiler extends AbstractCompiler {
                         Project4SemanticError.unexpectedType(ctx, op.type).throwException();
                     else if (op.valueCategory)
                         Project4SemanticError.lvalueRequired(ctx).throwException();
-                    else return new Expr(op.type, true);
+                    else if (isInteger(op)) {
+                        IRType ty = getIr(op.type);
+                        IRValue addr = op.value; 
+                        IRValue oldVal = curBlock.load(addr, ty, "old");
+                        IRValue one = IRValue.consti32(1);
+                        IRValue newVal;
+                        if (ctx.INC() != null)
+                            newVal = curBlock.add(oldVal, one, "inc");
+                        else
+                            newVal = curBlock.sub(oldVal, one, "dec");
+                        curBlock.store(addr, ty, newVal);
+                        return new Expr(op.type, true, newVal);
+                    }
+                    else {
+                        PointerType pt = (PointerType) op.type;
+                        IRValue addr = op.value;                     
+                        IRValue oldPtr = curBlock.load(addr, IRType.pointer(), "oldP");
+
+                        IRType ptTy = getIr(pt.referenceType);
+                        IRValue step = IRValue.consti32(1);
+                        if (ctx.DEC() != null) {
+                            step = IRValue.consti32(-1);
+                        }
+                        IRValue newPtr = curBlock.gep(oldPtr, ptTy, step, "newP");
+
+                        curBlock.store(addr, IRType.pointer(), newPtr);
+                        return new Expr(op.type, true, newPtr);
+                    }
                 }
                 // unary plus/minus
                 else if (ctx.PLUS() != null || ctx.MINUS() != null) {
                     if (!isInteger(op)) Project4SemanticError.unexpectedType(ctx, op.type).throwException();
-                    else return new Expr(new PrimitiveType("int"), true);
+                    else {
+                        IRValue val = op.valueCategory ? op.value 
+                        : curBlock.load(op.value, IRType.int32(), null);
+                        if (ctx.MINUS() != null) {
+                            IRValue zero = IRValue.consti32(0);
+                            val = curBlock.sub(zero, val, null);
+                        }
+                        return new Expr(new PrimitiveType("int"), true, val);
+                    }
                 }
                 // logical not
                 else if (ctx.NOT() != null) {
                     if (!isInteger(op) && !isPointer(op))
                         Project4SemanticError.unexpectedType(ctx, op.type).throwException();
-                    else return new Expr(new PrimitiveType("int"), true);
+                    IRValue res;
+                    IRValue zero = IRValue.consti32(0);
+                    IRValue nullVal = IRValue.constNull();
+                    IRValue val = op.valueCategory ? op.value 
+                        : curBlock.load(op.value, getIr(op.type), null);
+                    if (isInteger(op)) {
+                        res = curBlock.icmp(val, LLVMIcmpPredicate.Equals, zero, null);
+                    }
+                    else {
+                        res = curBlock.icmp(val, LLVMIcmpPredicate.Equals, nullVal, null);
+                    }
+                    IRValue result = curBlock.zext(res, IRType.int32(),null);
+                
+                    return new Expr(new PrimitiveType("int"), true, result);
                 }
                 return null;
             }
@@ -648,6 +864,8 @@ public class Compiler extends AbstractCompiler {
                 Expr lhs = parseExpression(ctx.expression());
                 if (lhs == null) return null;
                 String member = ctx.Identifier().getText();
+                int memberIndex = -1;
+                StructureType st = null;
                 // Structure Member Access
                 if (ctx.DOT() != null) {
                     if (!(lhs.type instanceof StructureType) || !((StructureType) lhs.type).isComplete)
@@ -656,7 +874,9 @@ public class Compiler extends AbstractCompiler {
                         Project4SemanticError.lvalueRequired(ctx).throwException();
                     else if (((StructureType) lhs.type).members.get(member) == null)
                         Project4SemanticError.badMember(ctx, lhs.type, member).throwException();
-                    return new Expr(((StructureType) lhs.type).members.get(member), false);
+                    st = (StructureType) lhs.type;
+
+                    // return new Expr(((StructureType) lhs.type).members.get(member), false);
                 }
                 // Structure Pointer Access
                 else {
@@ -667,20 +887,82 @@ public class Compiler extends AbstractCompiler {
                         Project4SemanticError.unexpectedType(ctx, ((PointerType) lhs.type).referenceType).throwException();
                     else if (((StructureType) ((PointerType) lhs.type).referenceType).members.get(member) == null)
                         Project4SemanticError.badMember(ctx, ((PointerType) lhs.type).referenceType, member).throwException();
-                    return new Expr(((StructureType) ((PointerType) lhs.type).referenceType).members.get(member), false);
+                    st = (StructureType) ((PointerType) lhs.type).referenceType;
+                    // return new Expr(((StructureType) ((PointerType) lhs.type).referenceType).members.get(member), false);
                 }
+                int i = 0;
+                for (String name : st.members.keySet()) {
+                    if (name.equals(member)) {
+                        memberIndex = i;
+                        break;
+                    }
+                    i++;
+                }
+                Type memberType = st.members.get(member);
+                IRValue strPtr;
+                if (ctx.DOT() != null) {
+                    strPtr = lhs.value;
+                }
+                else {
+                    strPtr = lhs.valueCategory ? lhs.value : curBlock.load(lhs.value, IRType.pointer(), null);
+                }
+                IRValue memberIndexVal = IRValue.consti32(memberIndex);
+                IRValue memberPtr = curBlock.gep(strPtr, getIr(st), 0, memberIndexVal, null);
+
+                return new Expr(memberType, false, memberPtr);
             }
 
             @Override
             public Expr visitExprAnd(SplcParser.ExprAndContext ctx) {
+                // 是否需要考虑逻辑运算的短路问题???
+                // 需要的！ 逻辑表达式中的自增可能会被跳过
                 Expr lhs = parseExpression(ctx.expression(0));
-                Expr rhs = parseExpression(ctx.expression(1));
-                if (lhs == null || rhs == null) return null;
+                if (lhs == null) return null;
+                IRValue lVal = lhs.valueCategory ? lhs.value : curBlock.load(lhs.value, getIr(lhs.type), "loadL");
+                IRValue zero = IRValue.consti32(0);
+                IRValue nullVal = IRValue.constNull();
+                IRValue lCond = null;
                 if (!isInteger(lhs) && !isPointer(lhs))
                     Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
+                if (isInteger(lhs)) {
+                    lCond = curBlock.icmp(lVal, LLVMIcmpPredicate.NotEquals, zero, "lcond");
+                } else {
+                    lCond = curBlock.icmp(lVal, LLVMIcmpPredicate.NotEquals, nullVal, "lcond");
+                }
+
+                IRValue resAddr = curBlock.alloca(IRType.int32(), "and.tmp");
+                curBlock.store(resAddr, IRType.int32(), zero);
+
+                BasicBlockBuilder rhsBlock = curFunc.newBasicBlock("and.rhs");
+                BasicBlockBuilder endBlock = curFunc.newBasicBlock("and.end");
+
+                curBlock.condBr(lCond, rhsBlock, endBlock);
+                //若lCond为1则访问rhsBlock, 若进入rhsBlock且rCond为1则说明两边都是1，则resVal为1
+
+                curBlock = rhsBlock;
+                Expr rhs = parseExpression(ctx.expression(1));
+                if (rhs == null) return null;
                 if (!isInteger(rhs) && !isPointer(rhs))
                     Project4SemanticError.unexpectedType(ctx, rhs.type).throwException();
-                return new Expr(new PrimitiveType("int"), true);
+
+                IRValue rVal = rhs.valueCategory
+                        ? rhs.value
+                        : curBlock.load(rhs.value, getIr(rhs.type), "loadR");
+                IRValue rCond;
+                if (isInteger(rhs)) {
+                    rCond = curBlock.icmp(rVal, LLVMIcmpPredicate.NotEquals, zero, "rcond");
+                } else {
+                    rCond = curBlock.icmp(rVal, LLVMIcmpPredicate.NotEquals, nullVal, "rcond");
+                }
+
+                IRValue rInt = curBlock.zext(rCond, IRType.int32(), null);
+                curBlock.store(resAddr, IRType.int32(), rInt);
+
+                curBlock.br(endBlock);
+                curBlock = endBlock;
+
+                IRValue resVal = curBlock.load(resAddr, IRType.int32(), "and.res");
+                return new Expr(new PrimitiveType("int"), true, resVal);
             }
 
             @Override
@@ -689,7 +971,14 @@ public class Compiler extends AbstractCompiler {
                 Symbol s = curScope.lookupId(name);
                 if (s == null || s.type instanceof FunctionType)
                     Project4SemanticError.identifierNotVariable(ctx, name).throwException();
-                return new Expr(s.type, false);
+                IRValue addr;
+                if (curFunc != null && varAddrs != null && varAddrs.containsKey(name)) {
+                    addr = varAddrs.get(name);
+                }
+                else {
+                    addr = irBuilder.global(name);
+                }
+                return new Expr(s.type, false, addr);
             }
 
             @Override
@@ -697,22 +986,67 @@ public class Compiler extends AbstractCompiler {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
                 if (lhs == null || rhs == null) return null;
+                IRValue result;
+                IRValue lVal;
+                IRValue rVal;
                 // integer +/- integer is allowed
-                if (isInteger(lhs) && isInteger(rhs))
-                    return new Expr(new PrimitiveType("int"), true);
-                else if (isInteger(lhs) && isPointer(rhs))
+                if (isInteger(lhs) && isInteger(rhs)) {
+                    IRType ty = getIr(lhs.type);
+                    lVal = lhs.valueCategory ? lhs.value : curBlock.load(lhs.value, ty, "loadL");
+                    rVal = rhs.valueCategory ? rhs.value : curBlock.load(rhs.value, ty, "loadR");
+                    if (ctx.PLUS() != null) {
+                        result = curBlock.add(lVal, rVal, "add");
+                    }
+                    else {
+                        result = curBlock.sub(lVal, rVal, "sub");
+                    }
+                    return new Expr(new PrimitiveType("int"), true, result);
+                }
+                else if (isInteger(lhs) && isPointer(rhs)) {
                     // integer + pointer is allowed -> pointer
-                    if (ctx.PLUS() != null) return new Expr(rhs.type, true);
+                    if (ctx.PLUS() != null) {
+                        IRValue idx = lhs.valueCategory
+                            ? lhs.value
+                            : curBlock.load(lhs.value, IRType.int32(), "idx");
+
+                        IRValue ptr = rhs.valueCategory
+                            ? rhs.value
+                            : curBlock.load(rhs.value, IRType.pointer(), "ptr");
+
+                        PointerType pt = (PointerType) rhs.type;
+                        IRType ptTy = getIr(pt.referenceType);
+                        result = curBlock.gep(ptr, ptTy, idx, "newP");
+                        return new Expr(rhs.type, true, result);
+                    }
                     // integer - pointer is not allowed
-                    else Project4SemanticError.unmatchedTypeForBinaryOP(ctx, ctx.MINUS().getSymbol(), lhs.type, rhs.type).throwException();
+                    else
+                        Project4SemanticError.unmatchedTypeForBinaryOP(ctx, ctx.MINUS().getSymbol(), lhs.type, rhs.type).throwException();
+                }
                 // pointer +/- integer is allowed -> pointer
-                else if (isPointer(lhs) && isInteger(rhs))
-                    return new Expr(lhs.type, true);
+                else if (isPointer(lhs) && isInteger(rhs)) {
+                    IRValue idx = rhs.valueCategory
+                        ? rhs.value
+                        : curBlock.load(rhs.value, IRType.int32(), "idx");
+                    if (ctx.MINUS() != null) {
+                        IRValue zero = IRValue.consti32(0);
+                        idx = curBlock.sub(zero, idx, "negIdx");
+                    }
+                    IRValue ptr = lhs.valueCategory
+                        ? lhs.value
+                        : curBlock.load(lhs.value, IRType.pointer(), "ptr");
+
+                    PointerType pt = (PointerType) lhs.type;
+                    IRType ptTy = getIr(pt.referenceType);
+
+                    result = curBlock.gep(ptr, ptTy, idx, "newP");
+                    return new Expr(lhs.type, true, result);
+                }
                 else if (isPointer(lhs) && isPointer(rhs)) {
                     // pointer - pointer is allowed
+                    // project 5 没有指针相减
                     if (ctx.MINUS() != null) {
                         if (lhs.type.equals(rhs.type))
-                            return new Expr(new PrimitiveType("int"), true);
+                            return null;
                         else {
                             Token token = ctx.MINUS().getSymbol();
                             Project4SemanticError.unmatchedTypeForBinaryOP(ctx, token, lhs.type, rhs.type).throwException();
@@ -738,7 +1072,36 @@ public class Compiler extends AbstractCompiler {
                     Project4SemanticError.unexpectedType(ctx, op.type).throwException();
                 else if (op.valueCategory)
                     Project4SemanticError.lvalueRequired(ctx).throwException();
-                return new Expr(op.type, true);
+                else if (isInteger(op)) {
+                    IRType ty = getIr(op.type);
+                    IRValue addr = op.value; 
+                    IRValue oldVal = curBlock.load(addr, ty, "old");
+                    IRValue one = IRValue.consti32(1);
+                    IRValue newVal;
+                    if (ctx.INC() != null)
+                        newVal = curBlock.add(oldVal, one, "inc");
+                    else
+                        newVal = curBlock.sub(oldVal, one, "dec");
+                    curBlock.store(addr, ty, newVal);
+                    return new Expr(op.type, true, oldVal);
+                    //后缀自增的表达式的值仍旧为原本的值
+                }
+                else {
+                    PointerType pt = (PointerType) op.type;
+                    IRValue addr = op.value;                     
+                    IRValue oldPtr = curBlock.load(addr, IRType.pointer(), "oldP");
+
+                    IRType ptTy = getIr(pt.referenceType);
+                    IRValue step = IRValue.consti32(1);
+                    if (ctx.DEC() != null) {
+                        step = IRValue.consti32(-1);
+                    }
+                    IRValue newPtr = curBlock.gep(oldPtr, ptTy, step, "newP");
+
+                    curBlock.store(addr, IRType.pointer(), newPtr);
+                    return new Expr(op.type, true, oldPtr);
+                }
+                return new Expr(op.type, true, IRValue.constNull());
             }
 
             @Override
@@ -752,9 +1115,25 @@ public class Compiler extends AbstractCompiler {
                     Project4SemanticError.lvalueRequired(ctx).throwException();
                 if (!isInteger(rhs)) Project4SemanticError.unexpectedType(ctx, rhs.type).throwException();
 
-                if (lhs.type instanceof ArrayType)
-                    return new Expr(((ArrayType) lhs.type).elementType, false);
-                else return new Expr(((PointerType) lhs.type).referenceType, false);
+                IRType idxTy = getIr(rhs.type);
+                IRValue idxVal = rhs.valueCategory
+                        ? rhs.value
+                        : curBlock.load(rhs.value, idxTy, "idx");
+
+                IRValue elemPtr;
+                if (lhs.type instanceof ArrayType arr) {
+                    IRValue arrPtr = lhs.value;
+                    IRType arrIrTy = getIr(arr);
+                    elemPtr = curBlock.gep(arrPtr, arrIrTy, 0, idxVal, "elemPtr"); //lhs为array时必为lvalue
+                    return new Expr(arr.elementType, false, elemPtr);
+                }
+                else {
+                    PointerType pt = (PointerType) lhs.type;
+                    IRValue ptrVal = lhs.valueCategory ? lhs.value : curBlock.load(lhs.value, IRType.pointer(), "ptr");
+                    IRType ptTy = getIr(pt.referenceType);
+                    elemPtr = curBlock.gep(ptrVal, ptTy, idxVal, "elemPtr");
+                    return new Expr(pt.referenceType, false, elemPtr);
+                }
             }
 
             @Override
@@ -762,8 +1141,22 @@ public class Compiler extends AbstractCompiler {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
                 if (lhs == null || rhs == null) return null;
-                if (isInteger(lhs) && isInteger(rhs))
-                    return new Expr(new PrimitiveType("int"), true);
+                if (isInteger(lhs) && isInteger(rhs)) {
+                    IRValue result;
+                    IRValue lVal = lhs.valueCategory ? lhs.value : curBlock.load(lhs.value, getIr(lhs.type), "lVal");
+                    IRValue rVal = rhs.valueCategory ? rhs.value : curBlock.load(rhs.value, getIr(rhs.type), "rVal");
+                    if (ctx.STAR() != null) {
+                        result = curBlock.mul(lVal, rVal, "multiply");
+                    }
+                    else if (ctx.DIV() != null) {
+                        result = curBlock.div(lVal, rVal, "div");
+                    }
+                    else if (ctx.MOD() != null) {
+                        result = curBlock.rem(lVal, rVal, "mod");
+                    }
+                    else return null;
+                    return new Expr(lhs.type, true, result);
+                }
                 else if (!isInteger(lhs))
                     Project4SemanticError.unexpectedType(ctx, lhs.type).throwException();
                 else
@@ -791,19 +1184,38 @@ public class Compiler extends AbstractCompiler {
                     grader.reportSemanticError(Project3SemanticError.definitionIncomplete(varIdentifier));
 
             this.curScope.defineId(new Symbol(varName, varType, true));
+            IRValue addr = null;
+            if (curFunc != null && curBlock != null) {
+                IRType irTy = getIr(varType);
+                addr = curBlock.alloca(irTy, varName);
+                if (varAddrs != null) {
+                    varAddrs.put(varName, addr);
+                }
+            }
             // Project 4 -- local varDec semantics
             if (ctx.ASSIGN() != null) {
                 try {
                     Expr rhs = new ExprVisitor().visit(ctx.expression());
                     if (rhs == null) return null;
-                    Expr lhs = new Expr(varType, false);
+                    Expr lhs = new Expr(varType, false, addr);
                     if (!((isInteger(lhs) && isInteger(rhs)) ||
                             (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type)) ||
                             (isPointer(lhs) && isNullPointer(ctx.expression())))) {
                         Token token = ctx.ASSIGN().getSymbol();
                         Project4SemanticError.unmatchedTypeForBinaryOP(ctx.expression(), token, lhs.type, rhs.type).throwException();
                     }
+                    if (addr != null) {
+                        IRValue rVal;
+                        if (isPointer(lhs) && isNullPointer(ctx.expression())) {
+                            rVal = IRValue.constNull();
+                        }
+                        else {
+                            rVal = rhs.valueCategory ? rhs.value : curBlock.load(rhs.value, getIr(rhs.type), null);                            
+                        }
+                        curBlock.store(addr, getIr(lhs.type), rVal);
+                    }
                 }
+
                 catch (Project4Exception e) {
                     grader.reportSemanticError(e);
                 }
@@ -814,33 +1226,97 @@ public class Compiler extends AbstractCompiler {
         // Project 4 -- If statement semantics
         @Override
         public Void visitIfStmt(SplcParser.IfStmtContext ctx) {
-            if (ctx.expression() != null) {
-                try {
-                    Expr expr = new ExprVisitor().visit(ctx.expression());
-                    if (!isInteger(expr) && !isPointer(expr))
-                        Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
-                } catch (Project4Exception e) {
-                    grader.reportSemanticError(e);
+            Expr expr = null;
+            try {
+                expr = new ExprVisitor().visit(ctx.expression());
+                if (!isInteger(expr) && !isPointer(expr)) {
+                    Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
+                    return null;
+                }
+            } catch (Project4Exception e) {
+                grader.reportSemanticError(e);
+            }
+
+            IRValue condVal = expr.valueCategory
+                ? expr.value
+                : curBlock.load(expr.value, getIr(expr.type), null);
+            IRValue condValI1;
+            if (isInteger(expr)) {
+                condValI1 = curBlock.icmp(condVal, LLVMIcmpPredicate.NotEquals, IRValue.consti32(0), null);
+            }
+            else {
+                condValI1 = curBlock.icmp(condVal, LLVMIcmpPredicate.NotEquals, IRValue.constNull(), null);
+            }
+            
+            BasicBlockBuilder thenBlock = curFunc.newBasicBlock("if.then");
+            BasicBlockBuilder endBlock = curFunc.newBasicBlock("if.end");
+            BasicBlockBuilder elseBlock = null;
+
+            if (ctx.ELSE() != null) {
+                elseBlock = curFunc.newBasicBlock("if.else");
+                // visit(ctx.statement(1));
+            }
+
+            if (elseBlock != null) {
+                curBlock.condBr(condValI1, thenBlock, elseBlock);
+            }
+            else curBlock.condBr(condValI1, thenBlock, endBlock);
+
+            curBlock = thenBlock;
+            visit(ctx.statement(0));
+            if (!curBlock.hasTerminated()) {
+                curBlock.br(endBlock);
+            }
+
+            if (elseBlock != null) {
+                curBlock = elseBlock;
+                visit(ctx.statement(1));
+                if (!curBlock.hasTerminated()) {
+                    curBlock.br(endBlock);
                 }
             }
-            visit(ctx.statement(0));
-            if (ctx.ELSE() != null) visit(ctx.statement(1));
+
+            curBlock = endBlock;
             return null;
         }
 
         // Project 4 -- While statement semantics
         @Override
         public Void visitWhileStmt(SplcParser.WhileStmtContext ctx) {
-            if (ctx.expression() != null) {
-                try {
-                    Expr expr = new ExprVisitor().visit(ctx.expression());
-                    if (!isInteger(expr) && !isPointer(expr))
-                        Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
-                } catch (Project4Exception e) {
-                    grader.reportSemanticError(e);
-                }
+            BasicBlockBuilder condBlock = curFunc.newBasicBlock("while.cond");
+            BasicBlockBuilder bodyBlock = curFunc.newBasicBlock("while.body");
+            BasicBlockBuilder endBlock = curFunc.newBasicBlock("while.end");
+
+            curBlock.br(condBlock);
+            curBlock = condBlock;
+
+            Expr expr = null;
+            try {
+                expr = new ExprVisitor().visit(ctx.expression());
+                if (!isInteger(expr) && !isPointer(expr))
+                    Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
+            } catch (Project4Exception e) {
+                grader.reportSemanticError(e);
             }
+
+            IRValue condVal = expr.valueCategory ? expr.value
+                : curBlock.load(expr.value, getIr(expr.type), null);
+            IRValue condValI1;
+            if (isInteger(expr)) {
+                condValI1 = curBlock.icmp(condVal, LLVMIcmpPredicate.NotEquals, IRValue.consti32(0), null);
+            }
+            else {
+                condValI1 = curBlock.icmp(condVal, LLVMIcmpPredicate.NotEquals, IRValue.constNull(), null);
+            }
+            curBlock.condBr(condValI1, bodyBlock, endBlock);
+
+            curBlock = bodyBlock;
             visit(ctx.statement());
+            if (!curBlock.hasTerminated()) {
+                curBlock.br(condBlock);
+            }
+
+            curBlock = endBlock;
             return null;
         }
 
@@ -854,6 +1330,12 @@ public class Compiler extends AbstractCompiler {
                     if (expected != null) {
                         if (!expected.equals(expr.type)) Project4SemanticError.unexpectedType(ctx.expression(), expr.type).throwException();
                     }
+                    if (curFunc != null && curBlock != null) {
+                        IRValue retVal = expr.valueCategory
+                            ? expr.value : curBlock.load(expr.value, getIr(expr.type), "retVal");
+                        curBlock.ret(retVal);
+                    }
+
                 } catch (Project4Exception e) {
                     grader.reportSemanticError(e);
                 }
@@ -888,24 +1370,39 @@ public class Compiler extends AbstractCompiler {
             return null;
         }
 
-        @Override
-        public Void visitExprID(SplcParser.ExprIDContext ctx) {
-            String name = ctx.Identifier().getText();
-            Symbol s = this.curScope.lookupId(name);
-            if (s == null)
-                grader.reportSemanticError(Project3SemanticError.undeclaredUse(ctx.Identifier()));
+//        @Override
+//        public Void visitExprID(SplcParser.ExprIDContext ctx) {
+//            String name = ctx.Identifier().getText();
+//            Symbol s = this.curScope.lookupId(name);
+//            if (s == null)
+//                grader.reportSemanticError(Project3SemanticError.undeclaredUse(ctx.Identifier()));
+//            return null;
+//        }
+//
+//        @Override
+//        public Void visitExprFuncCall(SplcParser.ExprFuncCallContext ctx) {
+//            String name = ctx.Identifier().getText();
+//            Symbol s = this.curScope.lookupId(name);
+//            if (s == null)
+//                grader.reportSemanticError(Project3SemanticError.undeclaredUse(ctx.Identifier()));
+//            if (ctx.expression() != null)
+//                for (SplcParser.ExpressionContext expr : ctx.expression()) visit(expr);
+//            return null;
+//        }
+
+        public IRType getIr(Type t){
+            if (t instanceof PrimitiveType) 
+                return IRType.int32();
+            else if (t instanceof PointerType) 
+                return IRType.pointer();
+            else if (t instanceof ArrayType arr) {
+                IRType elem = getIr(arr.elementType);
+                return IRType.array(elem, arr.length);
+            }
+            else if (t instanceof StructureType str)
+                return IRType.structure(str.tag);
             return null;
         }
 
-        @Override
-        public Void visitExprFuncCall(SplcParser.ExprFuncCallContext ctx) {
-            String name = ctx.Identifier().getText();
-            Symbol s = this.curScope.lookupId(name);
-            if (s == null)
-                grader.reportSemanticError(Project3SemanticError.undeclaredUse(ctx.Identifier()));
-            if (ctx.expression() != null)
-                for (SplcParser.ExpressionContext expr : ctx.expression()) visit(expr);
-            return null;
-        }
     }
 }
