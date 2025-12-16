@@ -572,10 +572,14 @@ public class Compiler extends AbstractCompiler {
                 Expr lhs = parseExpression(ctx.expression(0));
                 Expr rhs = parseExpression(ctx.expression(1));
                 if (lhs == null || rhs == null) return null;
-                if ((isInteger(lhs) && isInteger(rhs)) ||
-                        (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type)) ||
-                        (isPointer(lhs) && isNullPointer(ctx.expression(1))) ||
-                        (isNullPointer(ctx.expression(0)) && isPointer(rhs))) {
+                if ((isNullPointer(ctx.expression(0)) && isPointer(rhs)))
+                    lhs = new Expr(new PointerType(null), true, IRValue.constNull());
+                if ((isPointer(lhs) && isNullPointer(ctx.expression(1))))
+                    rhs = new Expr(new PointerType(null), true, IRValue.constNull());
+                if ((isPointer(lhs) && isNullPointer(ctx.expression(1)))
+                        || (isNullPointer(ctx.expression(0)) && isPointer(rhs))
+                        || (isInteger(lhs) && isInteger(rhs))
+                        || (isPointer(lhs) && isPointer(rhs) && lhs.type.equals(rhs.type))) {
                     IRValue lVal = lhs.value;
                     IRValue rVal = rhs.value;
                     IRType lTy = getIr(lhs.type);
