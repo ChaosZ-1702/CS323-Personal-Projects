@@ -189,11 +189,13 @@ public class Compiler extends AbstractCompiler {
         String name;
         Type type;
         boolean isDefined;
+        IRValue addr;
 
-        public Symbol(String name, Type type, boolean isDefined) {
+        public Symbol(String name, Type type, boolean isDefined, IRValue addr) {
             this.name = name;
             this.type = type;
             this.isDefined = isDefined;
+            this.addr = addr;
         }
     }
 
@@ -249,7 +251,6 @@ public class Compiler extends AbstractCompiler {
         ArrayDeque<FunctionType> functionStack;
         FunctionBuilder curFunc;
         BasicBlockBuilder curBlock;
-        Map<String, IRValue> varAddrs = new HashMap<>();
 
         public myVisitor() {
             this.fileScope = new Scope(null);
@@ -401,7 +402,7 @@ public class Compiler extends AbstractCompiler {
 
                 Type argFullType = parseFullType(args.varDec(i), argBaseType);
                 argTypes.add(argFullType);
-                this.curScope.defineId(new Symbol(argName, argFullType, true));
+                this.curScope.defineId(new Symbol(argName, argFullType, true, null));
             }
             return argTypes;
         }
@@ -424,7 +425,7 @@ public class Compiler extends AbstractCompiler {
                 exitScope();
 
                 FunctionType thisFunction = new FunctionType(baseType, funcArgTypes);
-                this.curScope.defineId(new Symbol(funcName, thisFunction, true));  // fileScope
+                this.curScope.defineId(new Symbol(funcName, thisFunction, true, null));  // fileScope
                 this.functions.put(funcName, thisFunction);
 
                 IRType retTy = getIr(thisFunction.returnType);
@@ -439,10 +440,9 @@ public class Compiler extends AbstractCompiler {
 
                 curFunc = irBuilder.defineFunction(funcName, retTy, irArgs);
                 curBlock = curFunc.rootBlock();
-                varAddrs = new HashMap<>();
 
                 for (String argName : funcArgScope.identifiers.keySet()) {
-                    varAddrs.put(argName, curFunc.param(argName)); 
+                    funcArgScope.lookupIdThis(argName).addr = curFunc.param(argName);
                 }
 
                 this.functionStack.push(thisFunction);
@@ -457,7 +457,6 @@ public class Compiler extends AbstractCompiler {
 
                 curFunc = null;
                 curBlock = null;
-                varAddrs = null;
             }
             // declaration
             else if (ctx.funcArgs() != null) {
@@ -470,7 +469,7 @@ public class Compiler extends AbstractCompiler {
                 exitScope();
 
                 FunctionType thisFunction = new FunctionType(baseType, funcArgTypes);
-                this.curScope.defineId(new Symbol(funcName, thisFunction, false));  // fileScope
+                this.curScope.defineId(new Symbol(funcName, thisFunction, false, null));  // fileScope
                 this.functions.put(funcName, thisFunction);
                 IRType retTy = getIr(thisFunction.returnType);
                 List<Pair<String, IRType>> irArgs = new ArrayList<>();
@@ -500,7 +499,7 @@ public class Compiler extends AbstractCompiler {
                         else
                             grader.reportSemanticError(Project3SemanticError.definitionIncomplete(varIdentifier));
 
-                this.curScope.defineId(new Symbol(varName, varType, true));
+                this.curScope.defineId(new Symbol(varName, varType, true, null));
                 this.variables.put(varName, varType);
                 irBuilder.defineGlobalVar(varName, getIr(varType));
             }
@@ -976,8 +975,8 @@ public class Compiler extends AbstractCompiler {
                 if (s == null || s.type instanceof FunctionType)
                     Project4SemanticError.identifierNotVariable(ctx, name).throwException();
                 IRValue addr;
-                if (curFunc != null && varAddrs != null && varAddrs.containsKey(name)) {
-                    addr = varAddrs.get(name);
+                if (curFunc != null && s.addr != null) {
+                    addr = s.addr;
                 }
                 else {
                     addr = irBuilder.global(name);
@@ -1187,14 +1186,13 @@ public class Compiler extends AbstractCompiler {
                 if (varIdentifier != null)
                     grader.reportSemanticError(Project3SemanticError.definitionIncomplete(varIdentifier));
 
-            this.curScope.defineId(new Symbol(varName, varType, true));
+            Symbol s = new Symbol(varName, varType, true, null);
+            this.curScope.defineId(s);
             IRValue addr = null;
             if (curFunc != null && curBlock != null) {
                 IRType irTy = getIr(varType);
                 addr = curBlock.alloca(irTy, varName);
-                if (varAddrs != null) {
-                    varAddrs.put(varName, addr);
-                }
+                s.addr = addr;
             }
             // Project 4 -- local varDec semantics
             if (ctx.ASSIGN() != null) {
@@ -1397,7 +1395,7 @@ public class Compiler extends AbstractCompiler {
         public IRType getIr(Type t){
             if (t instanceof PrimitiveType) 
                 return IRType.int32();
-            else if (t instanceof PointerType) 
+            else if (t instanceof PointerType)
                 return IRType.pointer();
             else if (t instanceof ArrayType arr) {
                 IRType elem = getIr(arr.elementType);
